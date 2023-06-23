@@ -1,16 +1,30 @@
 /**
  * "fastify-static" interfaces
- * @see https://github.com/fastify/fastify-static/blob/master/index.d.ts
+ * @see https://github.com/fastify/fastify-static/blob/master/types/index.d.ts
+ * @publicApi
  */
+import { Stats } from 'fs';
+
+interface ExtendedInformation {
+  fileCount: number;
+  totalFileCount: number;
+  folderCount: number;
+  totalFolderCount: number;
+  totalSize: number;
+  lastModified: number;
+}
 
 interface ListDir {
   href: string;
   name: string;
+  stats: Stats;
+  extendedInfo?: ExtendedInformation;
 }
 
 interface ListFile {
   href: string;
   name: string;
+  stats: Stats;
 }
 
 interface ListRender {
@@ -21,6 +35,8 @@ interface ListOptions {
   format: 'json' | 'html';
   names: string[];
   render: ListRender;
+  extendedFolderInfo?: boolean;
+  jsonFormat?: 'names' | 'extended';
 }
 
 // Passed on to `send`
@@ -34,6 +50,7 @@ interface SendOptions {
   index?: string[] | false;
   lastModified?: boolean;
   maxAge?: string | number;
+  serveDotFiles?: boolean;
 }
 
 export interface FastifyStaticOptions extends SendOptions {
@@ -48,6 +65,11 @@ export interface FastifyStaticOptions extends SendOptions {
   wildcard?: boolean;
   list?: boolean | ListOptions;
   allowedPath?: (pathName: string, root?: string) => boolean;
+  /**
+   * @description
+   * Opt-in to looking for pre-compressed files
+   */
+  preCompressed?: boolean;
 
   // Passed on to `send`
   acceptRanges?: boolean;

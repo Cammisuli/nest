@@ -1,5 +1,5 @@
-import { HttpServer, RequestMethod } from '@nestjs/common';
-import { RequestHandler } from '@nestjs/common/interfaces';
+import { HttpServer, RequestMethod, VersioningOptions } from '@nestjs/common';
+import { RequestHandler, VersionValue } from '@nestjs/common/interfaces';
 import {
   CorsOptions,
   CorsOptionsDelegate,
@@ -68,6 +68,12 @@ export abstract class AbstractHttpAdapter<
     return this.instance.all(...args);
   }
 
+  public search(port: string | number, callback?: () => void);
+  public search(port: string | number, hostname: string, callback?: () => void);
+  public search(port: any, hostname?: any, callback?: any) {
+    return this.instance.search(port, hostname, callback);
+  }
+
   public options(handler: RequestHandler);
   public options(path: any, handler: RequestHandler);
   public options(...args: any[]) {
@@ -100,17 +106,19 @@ export abstract class AbstractHttpAdapter<
   abstract initHttpServer(options: NestApplicationOptions);
   abstract useStaticAssets(...args: any[]);
   abstract setViewEngine(engine: string);
-  abstract getRequestHostname(request);
-  abstract getRequestMethod(request);
-  abstract getRequestUrl(request);
-  abstract status(response, statusCode: number);
-  abstract reply(response, body: any, statusCode?: number);
-  abstract render(response, view: string, options: any);
-  abstract redirect(response, statusCode: number, url: string);
+  abstract getRequestHostname(request: any);
+  abstract getRequestMethod(request: any);
+  abstract getRequestUrl(request: any);
+  abstract status(response: any, statusCode: number);
+  abstract reply(response: any, body: any, statusCode?: number);
+  abstract end(response: any, message?: string);
+  abstract render(response: any, view: string, options: any);
+  abstract redirect(response: any, statusCode: number, url: string);
   abstract setErrorHandler(handler: Function, prefix?: string);
   abstract setNotFoundHandler(handler: Function, prefix?: string);
-  abstract setHeader(response, name: string, value: string);
-  abstract registerParserMiddleware(prefix?: string);
+  abstract isHeadersSent(response: any);
+  abstract setHeader(response: any, name: string, value: string);
+  abstract registerParserMiddleware(prefix?: string, rawBody?: boolean);
   abstract enableCors(
     options: CorsOptions | CorsOptionsDelegate<TRequest>,
     prefix?: string,
@@ -121,4 +129,9 @@ export abstract class AbstractHttpAdapter<
     | ((path: string, callback: Function) => any)
     | Promise<(path: string, callback: Function) => any>;
   abstract getType(): string;
+  abstract applyVersionFilter(
+    handler: Function,
+    version: VersionValue,
+    versioningOptions: VersioningOptions,
+  ): (req: TRequest, res: TResponse, next: () => void) => Function;
 }

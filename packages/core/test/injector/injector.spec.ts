@@ -10,6 +10,8 @@ import { NestContainer } from '../../injector/container';
 import { Injector, PropertyDependency } from '../../injector/injector';
 import { InstanceWrapper } from '../../injector/instance-wrapper';
 import { Module } from '../../injector/module';
+import { PARAMTYPES_METADATA } from '@nestjs/common/constants';
+
 chai.use(chaiAsPromised);
 
 describe('Injector', () => {
@@ -93,8 +95,7 @@ describe('Injector', () => {
       ).to.eventually.be.rejected;
     });
 
-    it('should await done$ when "isPending"', async () => {
-      const value = 'test';
+    it('should await done$ when "isPending"', () => {
       const wrapper = new InstanceWrapper({
         name: 'MainTest',
         metatype: MainTest,
@@ -102,15 +103,29 @@ describe('Injector', () => {
         isResolved: false,
       });
       const host = wrapper.getInstanceByContextId(STATIC_CONTEXT);
-      host.donePromise = Promise.resolve(value) as any;
+      host.donePromise = Promise.resolve();
       host.isPending = true;
 
-      const result = await injector.loadInstance(
-        wrapper,
-        moduleDeps.providers,
-        moduleDeps,
-      );
-      expect(result).to.be.eql(value);
+      expect(
+        injector.loadInstance(wrapper, moduleDeps.providers, moduleDeps),
+      ).to.eventually.not.throw();
+    });
+
+    it('should await done$ when "isPending" and rethrow an exception (if thrown)', () => {
+      const error = new Error('Test error');
+      const wrapper = new InstanceWrapper({
+        name: 'MainTest',
+        metatype: MainTest,
+        instance: Object.create(MainTest.prototype),
+        isResolved: false,
+      });
+      const host = wrapper.getInstanceByContextId(STATIC_CONTEXT);
+      host.donePromise = Promise.resolve(error);
+      host.isPending = true;
+
+      expect(
+        injector.loadInstance(wrapper, moduleDeps.providers, moduleDeps),
+      ).to.eventually.throw(error);
     });
 
     it('should return undefined when metatype is resolved', async () => {
@@ -595,7 +610,7 @@ describe('Injector', () => {
       });
     });
 
-    describe('when instanceWraper has async property', () => {
+    describe('when instanceWrapper has async property', () => {
       it('should await instance', async () => {
         sinon.stub(injector, 'loadProvider').callsFake(() => null);
 
@@ -825,6 +840,24 @@ describe('Injector', () => {
       expect(dependencies).to.deep.eq([FixtureDep1, FixtureDep2]);
       expect(optionalDependenciesIds).to.deep.eq([1]);
     });
+
+    it('should not mutate the constructor metadata', async () => {
+      class FixtureDep1 {}
+      /** This needs to be something other than FixtureDep1 so the test can ensure that the metadata was not mutated */
+      const injectionToken = 'test_token';
+
+      @Injectable()
+      class FixtureClass {
+        constructor(@Inject(injectionToken) private dep1: FixtureDep1) {}
+      }
+
+      const wrapper = new InstanceWrapper({ metatype: FixtureClass });
+      const [dependencies] = injector.getClassDependencies(wrapper);
+      expect(dependencies).to.deep.eq([injectionToken]);
+
+      const paramtypes = Reflect.getMetadata(PARAMTYPES_METADATA, FixtureClass);
+      expect(paramtypes).to.deep.eq([FixtureDep1]);
+    });
   });
 
   describe('getFactoryProviderDependencies', () => {
@@ -850,6 +883,59 @@ describe('Injector', () => {
         {},
       ]);
       expect(optionalDependenciesIds).to.deep.eq([1]);
+    });
+  });
+
+  describe('addDependencyMetadata', () => {
+    interface IInjector extends Omit<Injector, 'addDependencyMetadata'> {
+      addDependencyMetadata: (
+        keyOrIndex: symbol | string | number,
+        hostWrapper: InstanceWrapper,
+        instanceWrapper: InstanceWrapper,
+      ) => void;
+    }
+
+    let exposedInjector: IInjector;
+    let hostWrapper: InstanceWrapper;
+    let instanceWrapper: InstanceWrapper;
+
+    beforeEach(() => {
+      exposedInjector = injector as unknown as IInjector;
+      hostWrapper = new InstanceWrapper();
+      instanceWrapper = new InstanceWrapper();
+    });
+
+    it('should add dependency metadata to PropertiesMetadata when key is symbol', async () => {
+      const addPropertiesMetadataSpy = sinon.spy(
+        hostWrapper,
+        'addPropertiesMetadata',
+      );
+
+      const key = Symbol.for('symbol');
+      exposedInjector.addDependencyMetadata(key, hostWrapper, instanceWrapper);
+
+      expect(addPropertiesMetadataSpy.called).to.be.true;
+    });
+
+    it('should add dependency metadata to PropertiesMetadata when key is string', async () => {
+      const addPropertiesMetadataSpy = sinon.spy(
+        hostWrapper,
+        'addPropertiesMetadata',
+      );
+
+      const key = 'string';
+      exposedInjector.addDependencyMetadata(key, hostWrapper, instanceWrapper);
+
+      expect(addPropertiesMetadataSpy.called).to.be.true;
+    });
+
+    it('should add dependency metadata to CtorMetadata when key is number', async () => {
+      const addCtorMetadataSpy = sinon.spy(hostWrapper, 'addCtorMetadata');
+
+      const key = 0;
+      exposedInjector.addDependencyMetadata(key, hostWrapper, instanceWrapper);
+
+      expect(addCtorMetadataSpy.called).to.be.true;
     });
   });
 });

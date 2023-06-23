@@ -1,7 +1,7 @@
 import * as GRPC from '@grpc/grpc-js';
 import * as ProtoLoader from '@grpc/proto-loader';
 import { INestApplication } from '@nestjs/common';
-import { Transport } from '@nestjs/microservices';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { Test } from '@nestjs/testing';
 import { fail } from 'assert';
 import { expect } from 'chai';
@@ -22,7 +22,7 @@ describe('GRPC transport', () => {
     app = module.createNestApplication();
     server = app.getHttpAdapter().getInstance();
 
-    app.connectMicroservice({
+    app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.GRPC,
       options: {
         package: ['math', 'math2'],
@@ -58,6 +58,18 @@ describe('GRPC transport', () => {
       .post('/upperMethod/sum')
       .send([1, 2, 3, 4, 5])
       .expect(200, { result: 15 });
+  });
+
+  it(`GRPC Receiving serialized Error`, async () => {
+    await request(server)
+      .post('/error?client=standard')
+      .expect(200)
+      .expect('false');
+
+    await request(server)
+      .post('/error?client=custom')
+      .expect(200)
+      .expect('true');
   });
 
   it(`GRPC Sending and Receiving HTTP POST (multiple proto)`, async () => {

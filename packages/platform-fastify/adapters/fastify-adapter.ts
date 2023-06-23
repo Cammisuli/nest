@@ -1,12 +1,14 @@
 import {
   HttpStatus,
   Logger,
+  RawBodyRequest,
   RequestMethod,
   StreamableFile,
+  VERSION_NEUTRAL,
   VersioningOptions,
   VersioningType,
 } from '@nestjs/common';
-import { VersionValue, VERSION_NEUTRAL } from '@nestjs/common/interfaces';
+import { VersionValue } from '@nestjs/common/interfaces';
 import {
   CorsOptions,
   CorsOptionsDelegate,
@@ -15,11 +17,13 @@ import { loadPackage } from '@nestjs/common/utils/load-package.util';
 import { isString, isUndefined } from '@nestjs/common/utils/shared.utils';
 import { AbstractHttpAdapter } from '@nestjs/core/adapters/http-adapter';
 import {
-  fastify,
+  FastifyBaseLogger,
+  FastifyBodyParser,
   FastifyInstance,
-  FastifyLoggerInstance,
+  FastifyListenOptions,
   FastifyPluginAsync,
   FastifyPluginCallback,
+  FastifyRegister,
   FastifyReply,
   FastifyRequest,
   FastifyServerOptions,
@@ -28,24 +32,30 @@ import {
   RawServerBase,
   RawServerDefault,
   RequestGenericInterface,
+  fastify,
 } from 'fastify';
 import * as Reply from 'fastify/lib/reply';
+import { kRouteContext } from 'fastify/lib/symbols';
 import { RouteShorthandMethod } from 'fastify/types/route';
 import * as http2 from 'http2';
 import * as https from 'https';
 import {
-  Chain as LightMyRequestChain,
   InjectOptions,
+  Chain as LightMyRequestChain,
   Response as LightMyRequestResponse,
 } from 'light-my-request';
+import * as pathToRegexp from 'path-to-regexp';
+// `querystring` is used internally in fastify for registering urlencoded body parser.
+import { parse as querystringParse } from 'querystring';
+import { NestFastifyBodyParserOptions } from '../interfaces';
 import {
   FastifyStaticOptions,
-  PointOfViewOptions,
+  FastifyViewOptions,
 } from '../interfaces/external';
 
 type FastifyHttp2SecureOptions<
   Server extends http2.Http2SecureServer,
-  Logger extends FastifyLoggerInstance = FastifyLoggerInstance,
+  Logger extends FastifyBaseLogger = FastifyBaseLogger,
 > = FastifyServerOptions<Server, Logger> & {
   http2: true;
   https: http2.SecureServerOptions;
@@ -53,7 +63,7 @@ type FastifyHttp2SecureOptions<
 
 type FastifyHttp2Options<
   Server extends http2.Http2Server,
-  Logger extends FastifyLoggerInstance = FastifyLoggerInstance,
+  Logger extends FastifyBaseLogger = FastifyBaseLogger,
 > = FastifyServerOptions<Server, Logger> & {
   http2: true;
   http2SessionTimeout?: number;
@@ -61,12 +71,16 @@ type FastifyHttp2Options<
 
 type FastifyHttpsOptions<
   Server extends https.Server,
-  Logger extends FastifyLoggerInstance = FastifyLoggerInstance,
+  Logger extends FastifyBaseLogger = FastifyBaseLogger,
 > = FastifyServerOptions<Server, Logger> & {
   https: https.ServerOptions;
 };
 
-type VersionedRoute = Function & {
+type VersionedRoute<TRequest, TResponse> = ((
+  req: TRequest,
+  res: TResponse,
+  next: Function,
+) => Function) & {
   version: VersionValue;
   versioningOptions: VersioningOptions;
 };
@@ -80,6 +94,9 @@ type VersionedRoute = Function & {
 type FastifyRawRequest<TServer extends RawServerBase> =
   RawRequestDefaultExpression<TServer> & { originalUrl?: string };
 
+/**
+ * @publicApi
+ */
 export class FastifyAdapter<
   TServer extends RawServerBase = RawServerDefault,
   TRawRequest extends FastifyRawRequest<TServer> = FastifyRawRequest<TServer>,
@@ -154,12 +171,9 @@ export class FastifyAdapter<
           ? acceptHeaderValue.split(';')[1]
           : '';
 
-        if (acceptHeaderVersionParameter) {
-          const headerVersion = acceptHeaderVersionParameter.split(
-            this.versioningOptions.key,
-          )[1];
-          return headerVersion;
-        }
+        return isUndefined(acceptHeaderVersionParameter)
+          ? VERSION_NEUTRAL // No version was supplied
+          : acceptHeaderVersionParameter.split(this.versioningOptions.key)[1];
       }
       // Header Versioning Handler
       else if (this.versioningOptions.type === VersioningType.HEADER) {
@@ -167,9 +181,9 @@ export class FastifyAdapter<
           req.headers?.[this.versioningOptions.header] ||
           req.headers?.[this.versioningOptions.header.toLowerCase()];
 
-        if (customHeaderVersionParameter) {
-          return customHeaderVersionParameter;
-        }
+        return isUndefined(customHeaderVersionParameter)
+          ? VERSION_NEUTRAL // No version was supplied
+          : customHeaderVersionParameter;
       }
       // Custom Versioning Handler
       else if (this.versioningOptions.type === VersioningType.CUSTOM) {
@@ -219,8 +233,31 @@ export class FastifyAdapter<
     hostname: string,
     callback?: () => void,
   ): void;
-  public listen(port: string | number, ...args: any[]): Promise<string> {
-    return this.instance.listen(port, ...args);
+  public listen(
+    listenOptions: string | number | FastifyListenOptions,
+    ...args: any[]
+  ): void {
+    const isFirstArgTypeofFunction = typeof args[0] === 'function';
+    const callback = isFirstArgTypeofFunction ? args[0] : args[1];
+
+    let options: Record<string, any>;
+    if (
+      typeof listenOptions === 'object' &&
+      (listenOptions.host !== undefined ||
+        listenOptions.port !== undefined ||
+        listenOptions.path !== undefined)
+    ) {
+      // First parameter is an object with a path, port and/or host attributes
+      options = listenOptions;
+    } else {
+      options = {
+        port: +listenOptions,
+      };
+    }
+    if (!isFirstArgTypeofFunction) {
+      options.host = args[0];
+    }
+    return this.instance.listen(options, callback);
   }
 
   public get(...args: any[]) {
@@ -255,11 +292,11 @@ export class FastifyAdapter<
     handler: Function,
     version: VersionValue,
     versioningOptions: VersioningOptions,
-  ) {
+  ): VersionedRoute<TRequest, TReply> {
     if (!this.versioningOptions) {
       this.versioningOptions = versioningOptions;
     }
-    const versionedRoute = handler as VersionedRoute;
+    const versionedRoute = handler as VersionedRoute<TRequest, TReply>;
     versionedRoute.version = version;
     return versionedRoute;
   }
@@ -273,7 +310,7 @@ export class FastifyAdapter<
       ? new Reply(
           response,
           {
-            context: {
+            [kRouteContext]: {
               preSerialization: null,
               preValidation: [],
               preHandler: [],
@@ -310,6 +347,17 @@ export class FastifyAdapter<
       }
       body = body.getStream();
     }
+    if (
+      fastifyReply.getHeader('Content-Type') !== undefined &&
+      fastifyReply.getHeader('Content-Type') !== 'application/json' &&
+      body?.statusCode >= HttpStatus.BAD_REQUEST
+    ) {
+      Logger.warn(
+        "Content-Type doesn't match Reply body, you might need a custom ExceptionFilter for non-JSON responses",
+        FastifyAdapter.name,
+      );
+      fastifyReply.header('Content-Type', 'application/json');
+    }
     return fastifyReply.send(body);
   }
 
@@ -319,6 +367,10 @@ export class FastifyAdapter<
       return response;
     }
     return (response as TReply).code(statusCode);
+  }
+
+  public end(response: TReply, message?: string) {
+    response.raw.end(message);
   }
 
   public render(
@@ -350,7 +402,7 @@ export class FastifyAdapter<
     return this.instance as unknown as T;
   }
 
-  public register<TRegister extends Parameters<TInstance['register']>>(
+  public register<TRegister extends Parameters<FastifyRegister<TInstance>>>(
     plugin: TRegister['0'],
     opts?: TRegister['1'],
   ) {
@@ -383,14 +435,14 @@ export class FastifyAdapter<
 
   public useStaticAssets(options: FastifyStaticOptions) {
     return this.register(
-      loadPackage('fastify-static', 'FastifyAdapter.useStaticAssets()', () =>
-        require('fastify-static'),
+      loadPackage('@fastify/static', 'FastifyAdapter.useStaticAssets()', () =>
+        require('@fastify/static'),
       ),
       options,
     );
   }
 
-  public setViewEngine(options: PointOfViewOptions | string) {
+  public setViewEngine(options: FastifyViewOptions | string) {
     if (isString(options)) {
       new Logger('FastifyAdapter').error(
         "setViewEngine() doesn't support a string argument.",
@@ -398,11 +450,15 @@ export class FastifyAdapter<
       process.exit(1);
     }
     return this.register(
-      loadPackage('point-of-view', 'FastifyAdapter.setViewEngine()', () =>
-        require('point-of-view'),
+      loadPackage('@fastify/view', 'FastifyAdapter.setViewEngine()', () =>
+        require('@fastify/view'),
       ),
       options,
     );
+  }
+
+  public isHeadersSent(response: TReply): boolean {
+    return response.sent;
   }
 
   public setHeader(response: TReply, name: string, value: string) {
@@ -424,14 +480,57 @@ export class FastifyAdapter<
   }
 
   public enableCors(options: CorsOptions | CorsOptionsDelegate<TRequest>) {
-    this.register(import('fastify-cors'), options);
+    this.register(
+      import('@fastify/cors') as Parameters<TInstance['register']>[0],
+      options,
+    );
   }
 
-  public registerParserMiddleware() {
+  public registerParserMiddleware(prefix?: string, rawBody?: boolean) {
     if (this._isParserRegistered) {
       return;
     }
-    this.register(import('fastify-formbody'));
+
+    this.registerUrlencodedContentParser(rawBody);
+    this.registerJsonContentParser(rawBody);
+
+    this._isParserRegistered = true;
+  }
+
+  public useBodyParser(
+    type: string | string[] | RegExp,
+    rawBody: boolean,
+    options?: NestFastifyBodyParserOptions,
+    parser?: FastifyBodyParser<Buffer, TServer>,
+  ) {
+    const parserOptions = {
+      ...(options || {}),
+      parseAs: 'buffer' as const,
+    };
+
+    this.getInstance().addContentTypeParser<Buffer>(
+      type,
+      parserOptions,
+      (
+        req: RawBodyRequest<FastifyRequest<unknown, TServer, TRawRequest>>,
+        body: Buffer,
+        done,
+      ) => {
+        if (rawBody === true && Buffer.isBuffer(body)) {
+          req.rawBody = body;
+        }
+
+        if (parser) {
+          parser(req, body, done);
+          return;
+        }
+
+        done(null, body);
+      },
+    );
+
+    // To avoid the Nest application init to override our custom
+    // body parser, we mark the parsers as registered.
     this._isParserRegistered = true;
   }
 
@@ -449,11 +548,24 @@ export class FastifyAdapter<
       // Fallback to "(.*)" to support plugins like GraphQL
       normalizedPath = normalizedPath === '/(.*)' ? '(.*)' : normalizedPath;
 
-      // The following type assertion is valid as we use import('middie') rather than require('middie')
+      const re = pathToRegexp(normalizedPath);
+
+      // The following type assertion is valid as we use import('@fastify/middie') rather than require('@fastify/middie')
       // ref https://github.com/fastify/middie/pull/55
       this.instance.use(
         normalizedPath,
-        callback as Parameters<TInstance['use']>['1'],
+        (req: any, res: any, next: Function) => {
+          const queryParamsIndex = req.originalUrl.indexOf('?');
+          const pathname =
+            queryParamsIndex >= 0
+              ? req.originalUrl.slice(0, queryParamsIndex)
+              : req.originalUrl;
+
+          if (!re.exec(pathname + '/') && normalizedPath) {
+            return next();
+          }
+          return callback(req, res, next);
+        },
       );
     };
   }
@@ -479,9 +591,47 @@ export class FastifyAdapter<
     return !('status' in response);
   }
 
+  private registerJsonContentParser(rawBody?: boolean) {
+    const contentType = 'application/json';
+    const withRawBody = !!rawBody;
+    const { bodyLimit } = this.getInstance().initialConfig;
+
+    this.useBodyParser(
+      contentType,
+      withRawBody,
+      { bodyLimit },
+      (req, body, done) => {
+        const { onProtoPoisoning, onConstructorPoisoning } =
+          this.instance.initialConfig;
+        const defaultJsonParser = this.instance.getDefaultJsonParser(
+          onProtoPoisoning || 'error',
+          onConstructorPoisoning || 'error',
+        ) as FastifyBodyParser<string | Buffer, TServer>;
+        defaultJsonParser(req, body, done);
+      },
+    );
+  }
+
+  private registerUrlencodedContentParser(rawBody?: boolean) {
+    const contentType = 'application/x-www-form-urlencoded';
+    const withRawBody = !!rawBody;
+    const { bodyLimit } = this.getInstance().initialConfig;
+
+    this.useBodyParser(
+      contentType,
+      withRawBody,
+      { bodyLimit },
+      (_req, body, done) => {
+        done(null, querystringParse(body.toString()));
+      },
+    );
+  }
+
   private async registerMiddie() {
     this.isMiddieRegistered = true;
-    await this.register(import('middie'));
+    await this.register(
+      import('@fastify/middie') as Parameters<TInstance['register']>[0],
+    );
   }
 
   private getRequestOriginalUrl(rawRequest: TRawRequest) {

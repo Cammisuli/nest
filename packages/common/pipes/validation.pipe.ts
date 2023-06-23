@@ -1,4 +1,5 @@
 import { iterate } from 'iterare';
+import { types } from 'util';
 import { Optional } from '../decorators';
 import { Injectable } from '../decorators/core';
 import { HttpStatus } from '../enums/http-status.enum';
@@ -17,8 +18,11 @@ import {
   HttpErrorByCode,
 } from '../utils/http-error-by-code.util';
 import { loadPackage } from '../utils/load-package.util';
-import { isNil, isObject } from '../utils/shared.utils';
+import { isNil, isUndefined } from '../utils/shared.utils';
 
+/**
+ * @publicApi
+ */
 export interface ValidationPipeOptions extends ValidatorOptions {
   transform?: boolean;
   disableErrorMessages?: boolean;
@@ -34,6 +38,11 @@ export interface ValidationPipeOptions extends ValidatorOptions {
 let classValidator: ValidatorPackage = {} as any;
 let classTransformer: TransformerPackage = {} as any;
 
+/**
+ * @see [Validation](https://docs.nestjs.com/techniques/validation)
+ *
+ * @publicApi
+ */
 @Injectable()
 export class ValidationPipe implements PipeTransform<any> {
   protected isTransformEnabled: boolean;
@@ -57,8 +66,10 @@ export class ValidationPipe implements PipeTransform<any> {
       ...validatorOptions
     } = options;
 
+    // @see https://github.com/nestjs/nest/issues/10683#issuecomment-1413690508
+    this.validatorOptions = { forbidUnknownValues: false, ...validatorOptions };
+
     this.isTransformEnabled = !!transform;
-    this.validatorOptions = validatorOptions;
     this.transformOptions = transformOptions;
     this.isDetailedOutputDisabled = disableErrorMessages;
     this.validateCustomDecorators = validateCustomDecorators || false;
@@ -144,7 +155,11 @@ export class ValidationPipe implements PipeTransform<any> {
       // if the value was originally undefined or null, revert it back
       return originalValue;
     }
-    return Object.keys(this.validatorOptions).length > 0
+    // we check if the number of keys of the "validatorOptions" is higher than 1 (instead of 0)
+    // because the "forbidUnknownValues" now fallbacks to "false" (in case it wasn't explicitly specified)
+    const shouldTransformToPlain =
+      Object.keys(this.validatorOptions).length > 1;
+    return shouldTransformToPlain
       ? classTransformer.classToPlain(entity, this.transformOptions)
       : value;
   }
@@ -178,6 +193,13 @@ export class ValidationPipe implements PipeTransform<any> {
       return value;
     }
     if (metatype === Boolean) {
+      if (isUndefined(value)) {
+        // This is an workaround to deal with optional boolean values since
+        // optional booleans shouldn't be parsed to a valid boolean when
+        // they were not defined
+        return undefined;
+      }
+      // Any fasly value but `undefined` will be parsed to `false`
       return value === true || value === 'true';
     }
     if (metatype === Number) {
@@ -190,12 +212,24 @@ export class ValidationPipe implements PipeTransform<any> {
     return isNil(value) ? {} : value;
   }
 
-  protected stripProtoKeys(value: Record<string, any>) {
+  protected stripProtoKeys(value: any) {
+    if (
+      value == null ||
+      typeof value !== 'object' ||
+      types.isTypedArray(value)
+    ) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        this.stripProtoKeys(v);
+      }
+      return;
+    }
     delete value.__proto__;
-    const keys = Object.keys(value);
-    iterate(keys)
-      .filter(key => isObject(value[key]) && value[key])
-      .forEach(key => this.stripProtoKeys(value[key]));
+    for (const key in value) {
+      this.stripProtoKeys(value[key]);
+    }
   }
 
   protected isPrimitive(value: unknown): boolean {

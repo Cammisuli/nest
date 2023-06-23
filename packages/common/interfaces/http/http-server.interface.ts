@@ -18,7 +18,11 @@ export type RequestHandler<TRequest = any, TResponse = any> = (
   next?: Function,
 ) => any;
 
-export interface HttpServer<TRequest = any, TResponse = any> {
+export interface HttpServer<
+  TRequest = any,
+  TResponse = any,
+  ServerInstance = any,
+> {
   use(
     handler:
       | RequestHandler<TRequest, TResponse>
@@ -30,6 +34,7 @@ export interface HttpServer<TRequest = any, TResponse = any> {
       | RequestHandler<TRequest, TResponse>
       | ErrorHandler<TRequest, TResponse>,
   ): any;
+  useBodyParser?(...args: any[]): any;
   get(handler: RequestHandler<TRequest, TResponse>): any;
   get(path: string, handler: RequestHandler<TRequest, TResponse>): any;
   post(handler: RequestHandler<TRequest, TResponse>): any;
@@ -50,8 +55,10 @@ export interface HttpServer<TRequest = any, TResponse = any> {
   listen(port: number | string, hostname: string, callback?: () => void): any;
   reply(response: any, body: any, statusCode?: number): any;
   status(response: any, statusCode: number): any;
+  end(response: any, message?: string): any;
   render(response: any, view: string, options: any): any;
   redirect(response: any, statusCode: number, url: string): any;
+  isHeadersSent(response: any): boolean;
   setHeader(response: any, name: string, value: string): any;
   setErrorHandler?(handler: Function, prefix?: string): any;
   setNotFoundHandler?(handler: Function, prefix?: string): any;
@@ -66,21 +73,17 @@ export interface HttpServer<TRequest = any, TResponse = any> {
   getRequestHostname?(request: TRequest): string;
   getRequestMethod?(request: TRequest): string;
   getRequestUrl?(request: TRequest): string;
-  getInstance(): any;
-  registerParserMiddleware(): any;
+  getInstance(): ServerInstance;
+  registerParserMiddleware(...args: any[]): any;
   enableCors(options: CorsOptions | CorsOptionsDelegate<TRequest>): any;
   getHttpServer(): any;
   initHttpServer(options: NestApplicationOptions): void;
   close(): any;
   getType(): string;
   init?(): Promise<void>;
-  applyVersionFilter?(
+  applyVersionFilter(
     handler: Function,
     version: VersionValue,
     versioningOptions: VersioningOptions,
-  ): <TRequest extends Record<string, any> = any, TResponse = any>(
-    req: TRequest,
-    res: TResponse,
-    next: () => void,
-  ) => any;
+  ): (req: TRequest, res: TResponse, next: () => void) => Function;
 }

@@ -2,7 +2,10 @@ import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 
 export const TCP_DEFAULT_PORT = 3000;
 export const TCP_DEFAULT_HOST = 'localhost';
-export const REDIS_DEFAULT_URL = 'redis://localhost:6379';
+
+export const REDIS_DEFAULT_PORT = 6379;
+export const REDIS_DEFAULT_HOST = 'localhost';
+
 export const NATS_DEFAULT_URL = 'nats://localhost:4222';
 export const MQTT_DEFAULT_URL = 'mqtt://localhost:1883';
 export const GRPC_DEFAULT_URL = 'localhost:5000';
@@ -36,10 +39,18 @@ export const RQM_DEFAULT_IS_GLOBAL_PREFETCH_COUNT = false;
 export const RQM_DEFAULT_QUEUE_OPTIONS = {};
 export const RQM_DEFAULT_NOACK = true;
 export const RQM_DEFAULT_PERSISTENT = false;
+export const RQM_DEFAULT_NO_ASSERT = false;
+export const RQM_NO_EVENT_HANDLER = (
+  text: TemplateStringsArray,
+  pattern: string,
+) =>
+  `An unsupported event was received. It has been acknowledged, so it will not be re-delivered. Pattern: ${pattern}`;
 export const GRPC_DEFAULT_PROTO_LOADER = '@grpc/proto-loader';
 
+export const NO_EVENT_HANDLER = (text: TemplateStringsArray, pattern: string) =>
+  `There is no matching event handler defined in the remote service. Event pattern: ${pattern}`;
 export const NO_MESSAGE_HANDLER = `There is no matching message handler defined in the remote service.`;
-export const NO_EVENT_HANDLER = `There is no matching event handler defined in the remote service.`;
+
 export const DISCONNECTED_RMQ_MESSAGE = `Disconnected from RMQ. Trying to reconnect.`;
 
 export const KAFKA_DEFAULT_CLIENT = 'nestjs-consumer';
@@ -52,3 +63,6 @@ export const MQTT_WILDCARD_ALL = '#';
 export const ECONNREFUSED = 'ECONNREFUSED';
 export const CONN_ERR = 'CONN_ERR';
 export const EADDRINUSE = 'EADDRINUSE';
+
+export const CONNECTION_FAILED_MESSAGE =
+  'Connection to transport failed. Trying to reconnect...';

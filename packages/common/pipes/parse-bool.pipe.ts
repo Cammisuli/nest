@@ -10,6 +10,9 @@ import {
   HttpErrorByCode,
 } from '../utils/http-error-by-code.util';
 
+/**
+ * @publicApi
+ */
 export interface ParseBoolPipeOptions {
   errorHttpStatusCode?: ErrorHttpStatusCode;
   exceptionFactory?: (error: string) => any;
@@ -48,14 +51,32 @@ export class ParseBoolPipe
     value: string | boolean,
     metadata: ArgumentMetadata,
   ): Promise<boolean> {
-    if (value === true || value === 'true') {
+    if (this.isTrue(value)) {
       return true;
     }
-    if (value === false || value === 'false') {
+    if (this.isFalse(value)) {
       return false;
     }
     throw this.exceptionFactory(
       'Validation failed (boolean string is expected)',
     );
+  }
+
+  /**
+   * @param value currently processed route argument
+   * @returns `true` if `value` is said 'true', ie., if it is equal to the boolean
+   * `true` or the string `"true"`
+   */
+  protected isTrue(value: string | boolean): boolean {
+    return value === true || value === 'true';
+  }
+
+  /**
+   * @param value currently processed route argument
+   * @returns `true` if `value` is said 'false', ie., if it is equal to the boolean
+   * `false` or the string `"false"`
+   */
+  protected isFalse(value: string | boolean): boolean {
+    return value === false || value === 'false';
   }
 }

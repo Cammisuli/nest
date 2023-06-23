@@ -40,28 +40,42 @@ import { ClientProxy } from './client-proxy';
 
 let kafkaPackage: any = {};
 
+/**
+ * @publicApi
+ */
 export class ClientKafka extends ClientProxy {
   protected logger = new Logger(ClientKafka.name);
-  protected client: Kafka = null;
-  protected consumer: Consumer = null;
-  protected producer: Producer = null;
-  protected parser: KafkaParser = null;
+  protected client: Kafka | null = null;
+  protected consumer: Consumer | null = null;
+  protected producer: Producer | null = null;
+  protected parser: KafkaParser | null = null;
+  protected initialized: Promise<void> | null = null;
   protected responsePatterns: string[] = [];
   protected consumerAssignments: { [key: string]: number } = {};
-
   protected brokers: string[] | BrokersFunction;
   protected clientId: string;
   protected groupId: string;
+  protected producerOnlyMode: boolean;
 
   constructor(protected readonly options: KafkaOptions['options']) {
     super();
 
-    const clientOptions =
-      this.getOptionsProp(this.options, 'client') || ({} as KafkaConfig);
-    const consumerOptions =
-      this.getOptionsProp(this.options, 'consumer') || ({} as ConsumerConfig);
-    const postfixId =
-      this.getOptionsProp(this.options, 'postfixId') || '-client';
+    const clientOptions = this.getOptionsProp(
+      this.options,
+      'client',
+      {} as KafkaConfig,
+    );
+    const consumerOptions = this.getOptionsProp(
+      this.options,
+      'consumer',
+      {} as ConsumerConfig,
+    );
+    const postfixId = this.getOptionsProp(this.options, 'postfixId', '-client');
+    this.producerOnlyMode = this.getOptionsProp(
+      this.options,
+      'producerOnlyMode',
+      false,
+    );
 
     this.brokers = clientOptions.brokers || [KAFKA_DEFAULT_BROKER];
 
@@ -91,52 +105,71 @@ export class ClientKafka extends ClientProxy {
     this.consumer && (await this.consumer.disconnect());
     this.producer = null;
     this.consumer = null;
+    this.initialized = null;
     this.client = null;
   }
 
   public async connect(): Promise<Producer> {
-    if (this.client) {
-      return this.producer;
+    if (this.initialized) {
+      return this.initialized.then(() => this.producer);
     }
-    this.client = this.createClient();
+    this.initialized = new Promise(async (resolve, reject) => {
+      try {
+        this.client = this.createClient();
 
-    const partitionAssigners = [
-      (config: ConstructorParameters<typeof KafkaReplyPartitionAssigner>[1]) =>
-        new KafkaReplyPartitionAssigner(this, config),
-    ] as any[];
+        if (!this.producerOnlyMode) {
+          const partitionAssigners = [
+            (
+              config: ConstructorParameters<
+                typeof KafkaReplyPartitionAssigner
+              >[1],
+            ) => new KafkaReplyPartitionAssigner(this, config),
+          ];
 
-    const consumerOptions = Object.assign(
-      {
-        partitionAssigners,
-      },
-      this.options.consumer || {},
-      {
-        groupId: this.groupId,
-      },
-    );
-    this.producer = this.client.producer(this.options.producer || {});
-    this.consumer = this.client.consumer(consumerOptions);
+          const consumerOptions = Object.assign(
+            {
+              partitionAssigners,
+            },
+            this.options.consumer || {},
+            {
+              groupId: this.groupId,
+            },
+          );
 
-    // set member assignments on join and rebalance
-    this.consumer.on(
-      this.consumer.events.GROUP_JOIN,
-      this.setConsumerAssignments.bind(this),
-    );
+          this.consumer = this.client.consumer(consumerOptions);
+          // set member assignments on join and rebalance
+          this.consumer.on(
+            this.consumer.events.GROUP_JOIN,
+            this.setConsumerAssignments.bind(this),
+          );
+          await this.consumer.connect();
+          await this.bindTopics();
+        }
 
-    await this.producer.connect();
-    await this.consumer.connect();
-    await this.bindTopics();
-    return this.producer;
+        this.producer = this.client.producer(this.options.producer || {});
+        await this.producer.connect();
+
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
+    return this.initialized.then(() => this.producer);
   }
 
   public async bindTopics(): Promise<void> {
+    if (!this.consumer) {
+      throw Error('No consumer initialized');
+    }
+
     const consumerSubscribeOptions = this.options.subscribe || {};
-    const subscribeTo = async (responsePattern: string) =>
-      this.consumer.subscribe({
-        topic: responsePattern,
+
+    if (this.responsePatterns.length > 0) {
+      await this.consumer.subscribe({
         ...consumerSubscribeOptions,
+        topics: this.responsePatterns,
       });
-    await Promise.all(this.responsePatterns.map(subscribeTo));
+    }
 
     await this.consumer.run(
       Object.assign(this.options.run || {}, {
@@ -267,12 +300,12 @@ export class ClientKafka extends ClientProxy {
     const consumerAssignments: { [key: string]: number } = {};
 
     // only need to set the minimum
-    Object.keys(data.payload.memberAssignment).forEach(memberId => {
-      const minimumPartition = Math.min(
-        ...data.payload.memberAssignment[memberId],
-      );
+    Object.keys(data.payload.memberAssignment).forEach(topic => {
+      const memberPartitions = data.payload.memberAssignment[topic];
 
-      consumerAssignments[memberId] = minimumPartition;
+      if (memberPartitions.length) {
+        consumerAssignments[topic] = Math.min(...memberPartitions);
+      }
     });
 
     this.consumerAssignments = consumerAssignments;

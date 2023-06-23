@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { of } from 'rxjs';
 import * as sinon from 'sinon';
+import { ExternalExceptionFilter } from '../../exceptions/external-exception-filter';
 import { ExternalExceptionsHandler } from '../../exceptions/external-exceptions-handler';
 
 describe('ExternalExceptionsHandler', () => {
@@ -8,16 +9,16 @@ describe('ExternalExceptionsHandler', () => {
 
   beforeEach(() => {
     handler = new ExternalExceptionsHandler();
+
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore The 'logger' property is private but we want to avoid showing useless error logs
+    ExternalExceptionFilter.logger.error = () => {};
   });
 
   describe('next', () => {
-    it('should method returns expected stream with message when exception is unknown', async () => {
+    it('should method returns expected stream with message when exception is unknown', () => {
       const error = new Error();
-      try {
-        await handler.next(error, null);
-      } catch (err) {
-        expect(err).to.be.eql(error);
-      }
+      expect(() => handler.next(error, null)).to.throw(error);
     });
     describe('when "invokeCustomFilters" returns value', () => {
       const observable$ = of(true);
@@ -36,7 +37,7 @@ describe('ExternalExceptionsHandler', () => {
       handler.setCustomFilters(filters as any);
       expect((handler as any).filters).to.be.eql(filters);
     });
-    it('should throws exception when passed argument is not an array', () => {
+    it('should throw exception when passed argument is not an array', () => {
       expect(() => handler.setCustomFilters(null)).to.throw();
     });
   });
@@ -49,6 +50,7 @@ describe('ExternalExceptionsHandler', () => {
     describe('when filters array is not empty', () => {
       let filters, funcSpy;
       class TestException {}
+      class AnotherTestException {}
 
       beforeEach(() => {
         funcSpy = sinon.spy();
@@ -73,6 +75,12 @@ describe('ExternalExceptionsHandler', () => {
         });
       });
       describe('when filter does not exists in filters array', () => {
+        beforeEach(() => {
+          filters = [
+            { exceptionMetatypes: [AnotherTestException], func: funcSpy },
+          ];
+          (handler as any).filters = filters;
+        });
         it('should not call funcSpy', () => {
           handler.invokeCustomFilters(new TestException(), null);
           expect(funcSpy.notCalled).to.be.true;

@@ -11,7 +11,6 @@ import {
 } from '../../external/kafka.interface';
 
 describe('ClientKafka', () => {
-  // static
   const topic = 'test.topic';
   const partition = 0;
   const replyTopic = 'test.topic.reply';
@@ -22,8 +21,9 @@ describe('ClientKafka', () => {
   const timestamp = new Date().toISOString();
   const attributes = 1;
   const messageValue = 'test-message';
+  const heartbeat = async () => {};
+  const pause = () => () => {};
 
-  // message
   const message: KafkaMessage = {
     key: Buffer.from(key),
     offset,
@@ -33,7 +33,6 @@ describe('ClientKafka', () => {
     attributes,
   };
 
-  // deserialized message
   const deserializedMessage: any = {
     key,
     offset,
@@ -45,7 +44,6 @@ describe('ClientKafka', () => {
     partition,
   };
 
-  // payloads
   const payload: EachMessagePayload = {
     topic,
     partition,
@@ -57,6 +55,8 @@ describe('ClientKafka', () => {
       },
       message,
     ),
+    heartbeat,
+    pause,
   };
 
   const payloadDisposed: EachMessagePayload = {
@@ -72,9 +72,11 @@ describe('ClientKafka', () => {
       message,
       {
         size: 0,
-        value: { test: true },
+        value: Buffer.from(JSON.stringify({ test: true })),
       },
     ),
+    heartbeat,
+    pause,
   };
 
   const payloadError: EachMessagePayload = {
@@ -93,6 +95,8 @@ describe('ClientKafka', () => {
         value: null,
       },
     ),
+    heartbeat,
+    pause,
   };
 
   const payloadWithoutCorrelation: EachMessagePayload = {
@@ -104,6 +108,8 @@ describe('ClientKafka', () => {
       },
       message,
     ),
+    heartbeat,
+    pause,
   };
 
   // deserialized payload
@@ -118,6 +124,8 @@ describe('ClientKafka', () => {
       },
       deserializedMessage,
     ),
+    heartbeat,
+    pause,
   };
 
   const deserializedPayloadDisposed: EachMessagePayload = {
@@ -136,24 +144,8 @@ describe('ClientKafka', () => {
         value: { test: true },
       },
     ),
-  };
-
-  const deserializedPayloadError: EachMessagePayload = {
-    topic,
-    partition,
-    message: Object.assign(
-      {
-        headers: {
-          [KafkaHeaders.CORRELATION_ID]: correlationId,
-          [KafkaHeaders.NEST_ERR]: NO_MESSAGE_HANDLER,
-        },
-      },
-      deserializedMessage,
-      {
-        size: 0,
-        value: null,
-      },
-    ),
+    heartbeat,
+    pause,
   };
 
   let client: ClientKafka;
@@ -166,7 +158,7 @@ describe('ClientKafka', () => {
   let consumerStub: sinon.SinonStub;
   let producerStub: sinon.SinonStub;
   let createClientStub: sinon.SinonStub;
-  let kafkaClient;
+  let kafkaClient: any;
 
   beforeEach(() => {
     client = new ClientKafka({});
@@ -277,47 +269,97 @@ describe('ClientKafka', () => {
     let bindTopicsStub: sinon.SinonStub;
     // let handleErrorsSpy: sinon.SinonSpy;
 
-    beforeEach(() => {
-      consumerAssignmentsStub = sinon.stub(
-        client as any,
-        'consumerAssignments',
-      );
-      bindTopicsStub = sinon
-        .stub(client, 'bindTopics')
-        .callsFake(async () => {});
+    describe('consumer and producer', () => {
+      beforeEach(() => {
+        consumerAssignmentsStub = sinon.stub(
+          client as any,
+          'consumerAssignments',
+        );
+        bindTopicsStub = sinon
+          .stub(client, 'bindTopics')
+          .callsFake(async () => {});
+      });
+
+      it('should expect the connection to be created', async () => {
+        const connection = await client.connect();
+
+        expect(createClientStub.calledOnce).to.be.true;
+        expect(producerStub.calledOnce).to.be.true;
+
+        expect(consumerStub.calledOnce).to.be.true;
+
+        expect(on.calledOnce).to.be.true;
+        expect(client['consumerAssignments']).to.be.empty;
+
+        expect(connect.calledTwice).to.be.true;
+
+        expect(bindTopicsStub.calledOnce).to.be.true;
+        expect(connection).to.deep.equal(producerStub());
+      });
+
+      it('should expect the connection to be reused', async () => {
+        (client as any).initialized = Promise.resolve({});
+
+        await client.connect();
+
+        expect(createClientStub.calledOnce).to.be.false;
+        expect(producerStub.calledOnce).to.be.false;
+        expect(consumerStub.calledOnce).to.be.false;
+
+        expect(on.calledOnce).to.be.false;
+        expect(client['consumerAssignments']).to.be.empty;
+
+        expect(connect.calledTwice).to.be.false;
+
+        expect(bindTopicsStub.calledOnce).to.be.false;
+      });
     });
 
-    it('should expect the connection to be created', async () => {
-      const connection = await client.connect();
+    describe('producer only mode', () => {
+      beforeEach(() => {
+        consumerAssignmentsStub = sinon.stub(
+          client as any,
+          'consumerAssignments',
+        );
+        bindTopicsStub = sinon
+          .stub(client, 'bindTopics')
+          .callsFake(async () => {});
+        client['producerOnlyMode'] = true;
+      });
 
-      expect(createClientStub.calledOnce).to.be.true;
-      expect(producerStub.calledOnce).to.be.true;
+      it('should expect the connection to be created', async () => {
+        const connection = await client.connect();
 
-      expect(consumerStub.calledOnce).to.be.true;
+        expect(createClientStub.calledOnce).to.be.true;
+        expect(producerStub.calledOnce).to.be.true;
 
-      expect(on.calledOnce).to.be.true;
-      expect(client['consumerAssignments']).to.be.empty;
+        expect(consumerStub.calledOnce).to.be.false;
 
-      expect(connect.calledTwice).to.be.true;
+        expect(on.calledOnce).to.be.false;
+        expect(client['consumerAssignments']).to.be.empty;
 
-      expect(bindTopicsStub.calledOnce).to.be.true;
-      expect(connection).to.deep.equal(producerStub());
-    });
+        expect(connect.calledOnce).to.be.true;
 
-    it('should expect the connection to be reused', async () => {
-      (client as any).client = kafkaClient;
-      await client.connect();
+        expect(bindTopicsStub.calledOnce).to.be.false;
+        expect(connection).to.deep.equal(producerStub());
+      });
 
-      expect(createClientStub.calledOnce).to.be.false;
-      expect(producerStub.calledOnce).to.be.false;
-      expect(consumerStub.calledOnce).to.be.false;
+      it('should expect the connection to be reused', async () => {
+        (client as any).initialized = Promise.resolve({});
 
-      expect(on.calledOnce).to.be.false;
-      expect(client['consumerAssignments']).to.be.empty;
+        await client.connect();
 
-      expect(connect.calledTwice).to.be.false;
+        expect(createClientStub.calledOnce).to.be.false;
+        expect(producerStub.calledOnce).to.be.false;
+        expect(consumerStub.calledOnce).to.be.false;
 
-      expect(bindTopicsStub.calledOnce).to.be.false;
+        expect(on.calledOnce).to.be.false;
+        expect(client['consumerAssignments']).to.be.empty;
+
+        expect(connect.calledTwice).to.be.false;
+
+        expect(bindTopicsStub.calledOnce).to.be.false;
+      });
     });
   });
 
@@ -353,6 +395,34 @@ describe('ClientKafka', () => {
         },
       );
     });
+
+    it('should not update consumer assignments if there are no partitions assigned to consumer', async () => {
+      await client.connect();
+
+      const consumerAssignments: ConsumerGroupJoinEvent = {
+        id: 'id',
+        type: 'type',
+        timestamp: 1234567890,
+        payload: {
+          duration: 20,
+          groupId: 'group-id',
+          isLeader: true,
+          leaderId: 'member-1',
+          groupProtocol: 'RoundRobin',
+          memberId: 'member-1',
+          memberAssignment: {
+            'topic-a': [],
+            'topic-b': [3, 4, 5],
+          },
+        },
+      };
+
+      client['setConsumerAssignments'](consumerAssignments);
+
+      expect(client['consumerAssignments']).to.deep.eq({
+        'topic-b': 3,
+      });
+    });
   });
 
   describe('bindTopics', () => {
@@ -365,7 +435,7 @@ describe('ClientKafka', () => {
       expect(subscribe.calledOnce).to.be.true;
       expect(
         subscribe.calledWith({
-          topic: replyTopic,
+          topics: [replyTopic],
         }),
       ).to.be.true;
       expect(run.calledOnce).to.be.true;
@@ -382,7 +452,7 @@ describe('ClientKafka', () => {
       expect(subscribe.calledOnce).to.be.true;
       expect(
         subscribe.calledWith({
-          topic: replyTopic,
+          topics: [replyTopic],
           fromBeginning: true,
         }),
       ).to.be.true;
@@ -424,7 +494,7 @@ describe('ClientKafka', () => {
         expect(
           callback.calledWith({
             isDisposed: true,
-            response: payloadDisposed.message.value,
+            response: deserializedPayloadDisposed.message.value,
             err: undefined,
           }),
         ).to.be.true;

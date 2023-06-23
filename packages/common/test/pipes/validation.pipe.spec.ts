@@ -3,12 +3,12 @@ import { expect } from 'chai';
 import * as chaiAsPromised from 'chai-as-promised';
 import { Exclude, Expose, Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsDefined,
   IsOptional,
   IsString,
   ValidateNested,
-  IsArray,
 } from 'class-validator';
 import { HttpStatus } from '../../enums';
 import { UnprocessableEntityException } from '../../exceptions';
@@ -45,7 +45,7 @@ class TestModel {
   public optionalProp: string;
 }
 
-class TestModelNoValidaton {
+class TestModelNoValidation {
   constructor() {}
 
   public prop1: string;
@@ -221,7 +221,7 @@ describe('ValidationPipe', () => {
         });
       });
       describe('when input is a query parameter (boolean)', () => {
-        it('should parse to boolean', async () => {
+        it('should parse the string "true" to the boolean true', async () => {
           target = new ValidationPipe({ transform: true });
           const value = 'true';
 
@@ -233,9 +233,45 @@ describe('ValidationPipe', () => {
             }),
           ).to.be.true;
         });
+        it('should parse the string "false" to the boolean false', async () => {
+          target = new ValidationPipe({ transform: true });
+          const value = 'false';
+
+          expect(
+            await target.transform(value, {
+              metatype: Boolean,
+              data: 'test',
+              type: 'query',
+            }),
+          ).to.be.false;
+        });
+        it('should parse an empty string to false', async () => {
+          target = new ValidationPipe({ transform: true });
+          const value = '';
+
+          expect(
+            await target.transform(value, {
+              metatype: Boolean,
+              data: 'test',
+              type: 'query',
+            }),
+          ).to.be.false;
+        });
+        it('should parse undefined to undefined', async () => {
+          target = new ValidationPipe({ transform: true });
+          const value = undefined;
+
+          expect(
+            await target.transform(value, {
+              metatype: Boolean,
+              data: 'test',
+              type: 'query',
+            }),
+          ).to.be.undefined;
+        });
       });
       describe('when input is a path parameter (boolean)', () => {
-        it('should parse to boolean', async () => {
+        it('should parse the string "true" to boolean true', async () => {
           target = new ValidationPipe({ transform: true });
           const value = 'true';
 
@@ -246,6 +282,42 @@ describe('ValidationPipe', () => {
               type: 'param',
             }),
           ).to.be.true;
+        });
+        it('should parse the string "false" to boolean false', async () => {
+          target = new ValidationPipe({ transform: true });
+          const value = 'false';
+
+          expect(
+            await target.transform(value, {
+              metatype: Boolean,
+              data: 'test',
+              type: 'param',
+            }),
+          ).to.be.false;
+        });
+        it('should parse an empty string to false', async () => {
+          target = new ValidationPipe({ transform: true });
+          const value = '';
+
+          expect(
+            await target.transform(value, {
+              metatype: Boolean,
+              data: 'test',
+              type: 'param',
+            }),
+          ).to.be.false;
+        });
+        it('should parse undefined to undefined', async () => {
+          target = new ValidationPipe({ transform: true });
+          const value = undefined;
+
+          expect(
+            await target.transform(value, {
+              metatype: Boolean,
+              data: 'test',
+              type: 'param',
+            }),
+          ).to.be.undefined;
         });
       });
       describe('when validation strips', () => {
@@ -367,7 +439,7 @@ describe('ValidationPipe', () => {
         });
       });
     });
-    describe('when type doesnt match', () => {
+    describe("when type doesn't match", () => {
       describe('when validation rules are applied', () => {
         it('should throw an error', async () => {
           target = new ValidationPipe();
@@ -389,7 +461,7 @@ describe('ValidationPipe', () => {
             { prop1: 'value1', prop2: 'value2', prop3: 'value3' },
           ];
 
-          const objMetadata = { ...metadata, metatype: TestModelNoValidaton };
+          const objMetadata = { ...metadata, metatype: TestModelNoValidation };
           const result = await target.transform(testObj, objMetadata);
 
           expect(result).to.not.be.instanceOf(TestModel);
@@ -447,7 +519,7 @@ describe('ValidationPipe', () => {
       target = new ValidationPipe({ expectedType: TestModel });
       const testObj = { prop1: 'value1', prop2: 'value2' };
 
-      expect(await target.transform(testObj, m)).to.equal(testObj);
+      expect(await target.transform(testObj, m)).to.deep.equal(testObj);
     });
 
     it('should validate against the expected type if presented and metatype is primitive type', async () => {
@@ -460,7 +532,7 @@ describe('ValidationPipe', () => {
       target = new ValidationPipe({ expectedType: TestModel });
       const testObj = { prop1: 'value1', prop2: 'value2' };
 
-      expect(await target.transform(testObj, m)).to.equal(testObj);
+      expect(await target.transform(testObj, m)).to.deep.equal(testObj);
     });
   });
 });

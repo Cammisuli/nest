@@ -30,7 +30,7 @@ describe('Module', () => {
     const setSpy = sinon.spy(collection, 'set');
     (module as any)._controllers = collection;
 
-    @Controller({ scope: Scope.REQUEST })
+    @Controller({ scope: Scope.REQUEST, durable: true })
     class Test {}
 
     module.addController(Test);
@@ -43,6 +43,7 @@ describe('Module', () => {
           name: 'Test',
           scope: Scope.REQUEST,
           metatype: Test,
+          durable: true,
           instance: null,
           isResolved: false,
         }),
@@ -55,7 +56,7 @@ describe('Module', () => {
     const setSpy = sinon.spy(collection, 'set');
     (module as any)._injectables = collection;
 
-    module.addInjectable(TestProvider, TestModule);
+    module.addInjectable(TestProvider, 'interceptor', TestModule);
     expect(
       setSpy.calledWith(
         TestProvider,
@@ -66,7 +67,9 @@ describe('Module', () => {
           scope: undefined,
           metatype: TestProvider,
           instance: null,
+          durable: undefined,
           isResolved: false,
+          subtype: 'interceptor',
         }),
       ),
     ).to.be.true;
@@ -76,7 +79,7 @@ describe('Module', () => {
     it('should call `addCustomProvider`', () => {
       const addCustomProviderSpy = sinon.spy(module, 'addCustomProvider');
 
-      module.addInjectable({ provide: 'test' } as any);
+      module.addInjectable({ provide: 'test' } as any, 'guard');
       expect(addCustomProviderSpy.called).to.be.true;
     });
   });
@@ -96,6 +99,7 @@ describe('Module', () => {
           token: TestProvider,
           scope: undefined,
           metatype: TestProvider,
+          durable: undefined,
           instance: null,
           isResolved: false,
         }),
@@ -133,6 +137,16 @@ describe('Module', () => {
     expect((addCustomValue as sinon.SinonSpy).called).to.be.true;
   });
 
+  it('should call "addCustomValue" when "useValue" property exists but its value is `undefined`', () => {
+    const addCustomValue = sinon.spy();
+    module.addCustomValue = addCustomValue;
+
+    const provider = { provide: 'test', useValue: undefined };
+
+    module.addCustomProvider(provider as any, new Map());
+    expect((addCustomValue as sinon.SinonSpy).called).to.be.true;
+  });
+
   it('should call "addCustomFactory" when "useFactory" property exists', () => {
     const addCustomFactory = sinon.spy();
     module.addCustomFactory = addCustomFactory;
@@ -155,7 +169,7 @@ describe('Module', () => {
 
   describe('addCustomClass', () => {
     const type = { name: 'TypeTest' };
-    const provider = { provide: type, useClass: type };
+    const provider = { provide: type, useClass: type, durable: true };
     let setSpy;
 
     beforeEach(() => {
@@ -174,8 +188,10 @@ describe('Module', () => {
             name: provider.provide.name,
             scope: undefined,
             metatype: type as any,
+            durable: true,
             instance: null,
             isResolved: false,
+            subtype: undefined,
           }),
         ),
       ).to.be.true;
@@ -207,6 +223,7 @@ describe('Module', () => {
             instance: value,
             isResolved: true,
             async: false,
+            subtype: undefined,
           }),
         ),
       ).to.be.true;
@@ -216,7 +233,7 @@ describe('Module', () => {
   describe('addCustomFactory', () => {
     const type = { name: 'TypeTest' };
     const inject = [1, 2, 3];
-    const provider = { provide: type, useFactory: type, inject };
+    const provider = { provide: type, useFactory: type, inject, durable: true };
 
     let setSpy;
     beforeEach(() => {
@@ -236,9 +253,11 @@ describe('Module', () => {
             name: provider.provide.name,
             scope: undefined,
             metatype: type as any,
+            durable: true,
             instance: null,
             isResolved: false,
             inject: inject as any,
+            subtype: undefined,
           }),
         ),
       ).to.be.true;
@@ -274,6 +293,7 @@ describe('Module', () => {
             inject: [provider.useExisting as any],
             isResolved: false,
             isAlias: true,
+            subtype: undefined,
           }),
         ),
       ).to.be.true;
@@ -286,7 +306,7 @@ describe('Module', () => {
       beforeEach(() => {
         sinon.stub((module as any)._providers, 'has').returns(false);
       });
-      it('should throws RuntimeException', () => {
+      it('should throw RuntimeException', () => {
         expect(() => module.instance).to.throws(RuntimeException);
       });
     });
@@ -356,7 +376,6 @@ describe('Module', () => {
       (module as any)._imports = test;
 
       expect(module.imports).to.be.eql(test);
-      expect(module.relatedModules).to.be.eql(test);
     });
   });
 
@@ -374,7 +393,6 @@ describe('Module', () => {
       (module as any)._controllers = test;
 
       expect(module.controllers).to.be.eql(test);
-      expect(module.routes).to.be.eql(test);
     });
   });
 
@@ -393,14 +411,11 @@ describe('Module', () => {
       (module as any)._providers = test;
 
       expect(module.providers).to.be.eql(test);
-      expect(module.components).to.be.eql(test);
     });
   });
 
   describe('createModuleReferenceType', () => {
-    let moduleRef;
-
-    class SimpleClass {}
+    let moduleRef: any;
 
     beforeEach(() => {
       const Class = module.createModuleReferenceType();

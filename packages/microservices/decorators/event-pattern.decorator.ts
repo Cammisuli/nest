@@ -15,6 +15,8 @@ import { Transport } from '../enums';
 
 /**
  * Subscribes to incoming events which fulfils chosen pattern.
+ *
+ * @publicApi
  */
 export const EventPattern: {
   <T = string>(metadata?: T): MethodDecorator;
@@ -48,14 +50,25 @@ export const EventPattern: {
     key: string | symbol,
     descriptor: PropertyDescriptor,
   ) => {
-    Reflect.defineMetadata(PATTERN_METADATA, metadata, descriptor.value);
+    Reflect.defineMetadata(
+      PATTERN_METADATA,
+      [].concat(metadata),
+      descriptor.value,
+    );
     Reflect.defineMetadata(
       PATTERN_HANDLER_METADATA,
       PatternHandler.EVENT,
       descriptor.value,
     );
     Reflect.defineMetadata(TRANSPORT_METADATA, transport, descriptor.value);
-    Reflect.defineMetadata(PATTERN_EXTRAS_METADATA, extras, descriptor.value);
+    Reflect.defineMetadata(
+      PATTERN_EXTRAS_METADATA,
+      {
+        ...Reflect.getMetadata(PATTERN_EXTRAS_METADATA, descriptor.value),
+        ...extras,
+      },
+      descriptor.value,
+    );
     return descriptor;
   };
 };

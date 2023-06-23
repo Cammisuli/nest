@@ -23,6 +23,8 @@ export enum GrpcMethodStreamingType {
 
 /**
  * Subscribes to incoming messages which fulfils chosen pattern.
+ *
+ * @publicApi
  */
 export const MessagePattern: {
   <T = PatternMetadata | string>(metadata?: T): MethodDecorator;
@@ -62,14 +64,25 @@ export const MessagePattern: {
     key: string | symbol,
     descriptor: PropertyDescriptor,
   ) => {
-    Reflect.defineMetadata(PATTERN_METADATA, metadata, descriptor.value);
+    Reflect.defineMetadata(
+      PATTERN_METADATA,
+      [].concat(metadata),
+      descriptor.value,
+    );
     Reflect.defineMetadata(
       PATTERN_HANDLER_METADATA,
       PatternHandler.MESSAGE,
       descriptor.value,
     );
     Reflect.defineMetadata(TRANSPORT_METADATA, transport, descriptor.value);
-    Reflect.defineMetadata(PATTERN_EXTRAS_METADATA, extras, descriptor.value);
+    Reflect.defineMetadata(
+      PATTERN_EXTRAS_METADATA,
+      {
+        ...Reflect.getMetadata(PATTERN_EXTRAS_METADATA, descriptor.value),
+        ...extras,
+      },
+      descriptor.value,
+    );
     return descriptor;
   };
 };

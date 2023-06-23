@@ -4,15 +4,14 @@ import { MetadataScanner } from '@nestjs/core/metadata-scanner';
 import {
   CLIENT_CONFIGURATION_METADATA,
   CLIENT_METADATA,
+  PATTERN_EXTRAS_METADATA,
   PATTERN_HANDLER_METADATA,
   PATTERN_METADATA,
   TRANSPORT_METADATA,
-  PATTERN_EXTRAS_METADATA,
 } from './constants';
 import { Transport } from './enums';
 import { PatternHandler } from './enums/pattern-handler.enum';
-import { ClientOptions } from './interfaces/client-metadata.interface';
-import { PatternMetadata } from './interfaces/pattern-metadata.interface';
+import { ClientOptions, PatternMetadata } from './interfaces';
 
 export interface ClientProperties {
   property: string;
@@ -20,7 +19,7 @@ export interface ClientProperties {
 }
 
 export interface EventOrMessageListenerDefinition {
-  pattern: PatternMetadata;
+  patterns: PatternMetadata[];
   methodKey: string;
   isEventHandler: boolean;
   targetCallback: (...args: any[]) => any;
@@ -38,12 +37,10 @@ export class ListenerMetadataExplorer {
 
   public explore(instance: Controller): EventOrMessageListenerDefinition[] {
     const instancePrototype = Object.getPrototypeOf(instance);
-    return this.metadataScanner.scanFromPrototype<
-      Controller,
-      EventOrMessageListenerDefinition
-    >(instance, instancePrototype, method =>
-      this.exploreMethodMetadata(instancePrototype, method),
-    );
+    return this.metadataScanner
+      .getAllMethodNames(instancePrototype)
+      .map(method => this.exploreMethodMetadata(instancePrototype, method))
+      .filter(metadata => metadata);
   }
 
   public exploreMethodMetadata(
@@ -58,13 +55,13 @@ export class ListenerMetadataExplorer {
     if (isUndefined(handlerType)) {
       return;
     }
-    const pattern = Reflect.getMetadata(PATTERN_METADATA, targetCallback);
+    const patterns = Reflect.getMetadata(PATTERN_METADATA, targetCallback);
     const transport = Reflect.getMetadata(TRANSPORT_METADATA, targetCallback);
     const extras = Reflect.getMetadata(PATTERN_EXTRAS_METADATA, targetCallback);
     return {
       methodKey,
       targetCallback,
-      pattern,
+      patterns,
       transport,
       extras,
       isEventHandler: handlerType === PatternHandler.EVENT,

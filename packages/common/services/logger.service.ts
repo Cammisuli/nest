@@ -1,11 +1,16 @@
-import { Injectable } from '../decorators/core/injectable.decorator';
-import { Optional } from '../decorators/core/optional.decorator';
+import { Injectable, Optional } from '../decorators/core';
 import { isObject } from '../utils/shared.utils';
 import { ConsoleLogger } from './console-logger.service';
 import { isLogLevelEnabled } from './utils';
 
+/**
+ * @publicApi
+ */
 export type LogLevel = 'log' | 'error' | 'warn' | 'debug' | 'verbose';
 
+/**
+ * @publicApi
+ */
 export interface LoggerService {
   /**
    * Write a 'log' level log.
@@ -53,6 +58,18 @@ interface LogBufferRecord {
 
 const DEFAULT_LOGGER = new ConsoleLogger();
 
+const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+  day: '2-digit',
+  month: '2-digit',
+});
+
+/**
+ * @publicApi
+ */
 @Injectable()
 export class Logger implements LoggerService {
   protected static logBuffer = new Array<LogBufferRecord>();
@@ -108,7 +125,9 @@ export class Logger implements LoggerService {
   @Logger.WrapBuffer
   error(message: any, ...optionalParams: any[]) {
     optionalParams = this.context
-      ? optionalParams.concat(this.context)
+      ? (optionalParams.length ? optionalParams : [undefined]).concat(
+          this.context,
+        )
       : optionalParams;
 
     this.localInstance?.error(message, ...optionalParams);
@@ -169,6 +188,7 @@ export class Logger implements LoggerService {
   /**
    * Write an 'error' level log.
    */
+  static error(message: any, stackOrContext?: string): void;
   static error(message: any, context?: string): void;
   static error(message: any, stack?: string, context?: string): void;
   static error(
@@ -234,7 +254,7 @@ export class Logger implements LoggerService {
 
   /**
    * Attach buffer.
-   * Turns on initialisation logs buffering.
+   * Turns on initialization logs buffering.
    */
   static attachBuffer() {
     this.isBufferAttached = true;
@@ -242,25 +262,14 @@ export class Logger implements LoggerService {
 
   /**
    * Detach buffer.
-   * Turns off initialisation logs buffering.
+   * Turns off initialization logs buffering.
    */
   static detachBuffer() {
     this.isBufferAttached = false;
   }
 
   static getTimestamp() {
-    const localeStringOptions = {
-      year: 'numeric',
-      hour: 'numeric',
-      minute: 'numeric',
-      second: 'numeric',
-      day: '2-digit',
-      month: '2-digit',
-    };
-    return new Date(Date.now()).toLocaleString(
-      undefined,
-      localeStringOptions as Intl.DateTimeFormatOptions,
-    );
+    return dateTimeFormatter.format(Date.now());
   }
 
   static overrideLogger(logger: LoggerService | LogLevel[] | boolean) {
@@ -270,7 +279,7 @@ export class Logger implements LoggerService {
     }
     if (isObject(logger)) {
       if (logger instanceof Logger && logger.constructor !== Logger) {
-        const errorMessage = `Using the "extends Logger" instruction is not allowed in Nest v8. Please, use "extends ConsoleLogger" instead.`;
+        const errorMessage = `Using the "extends Logger" instruction is not allowed in Nest v9. Please, use "extends ConsoleLogger" instead.`;
         this.staticInstanceRef.error(errorMessage);
         throw new Error(errorMessage);
       }
